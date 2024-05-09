@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM ubuntu:22.04
 
 WORKDIR /home
 
@@ -6,58 +6,13 @@ WORKDIR /home
 ENV FORCE_UNSAFE_CONFIGURE=1
 
 #Which version should we build
-ARG RUTOS_VERSION
-ARG RUTOS_CHECKSUM
+ARG RUTOS_VERSION=00.07.07.1
+ARG RUTOS_SHORT_VER=7.7.1
 
 #Based on https://wiki.teltonika-networks.com/view/RUTOS_Software_Development_Kit_instructions
 RUN \
 	apt-get update &&\
-	apt-get install -y  \
-        build-essential  \
-        ccache  \
-        ecj  \
-        fastjar  \
-        file  \
-        g++  \
-        gawk  \
-        gettext  \
-        git  \
-        java-propose-classpath  \
-        libelf-dev  \
-        libncurses5-dev  \
-        libncursesw5-dev  \
-        libssl1.0-dev  \
-        python  \
-        python2.7-dev  \
-        python3  \
-        unzip  \
-        wget  \
-        python3-distutils  \
-        python3-setuptools  \
-        rsync  \
-        subversion  \
-        swig  \
-        time  \
-        libffi-dev  \
-        libtool  \
-        xsltproc  \
-        zlib1g-dev  \
-        u-boot-tools  \
-        jq \
-        nano \
-        curl \
-        dirmngr \
-        apt-transport-https \
-        lsb-release \
-        ca-certificates \
-        sudo \
-        netbeans
-
-#SDK needs NodeJS 12.x which is not being shipped by Ubuntu 18.04
-RUN \
-    curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash - && \
-    sudo apt -y install nodejs && \
-    npm install -g node-gyp
+	apt-get install -y sqlite3 vim sudo curl build-essential ccache ecj fastjar file flex g++ gawk gettext git java-propose-classpath java-wrappers jq libelf-dev libffi-dev libncurses5-dev libncursesw5-dev libssl-dev libtool python2.7-dev python3 python3-dev python3-distutils python3-setuptools rsync subversion swig time u-boot-tools unzip wget xsltproc zlib1g-dev bison
 
 #Building with root permissions will fail miserably
 #See: https://code.visualstudio.com/remote/advancedcontainers/add-nonroot-user
@@ -74,18 +29,33 @@ RUN chmod 0440 /etc/sudoers.d/$USERNAME
 #Switch to user
 USER $USER_UID:$USER_GID
 
+#Install nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash && \
+    export NVM_DIR="$HOME/.nvm" && \
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
+    nvm install 19 && \
+    nvm use 19 && \
+    npm install -g yarn 
+RUN sudo ln -f -s $HOME/.nvm/versions/node/v19.9.0/bin/node /usr/bin/node
+RUN sudo ln -f -s $HOME/.nvm/versions/node/v19.9.0/bin/npm /usr/bin/npm
+
+RUN node --version
+RUN npm --version
+
 #Download/Unpack
 RUN \
     cd ~ && \
     export RUTOS_FILE=RUTX_R_GPL_${RUTOS_VERSION}.tar.gz && \
-    wget https://firmware.teltonika-networks.com/${${RUTOS_VERSION//0}:1}/RUTX/${RUTOS_FILE} && \
-    echo "${RUTOS_CHECKSUM} ${RUTOS_FILE}" | md5sum -c --status && \
+    wget https://firmware.teltonika-networks.com/${RUTOS_SHORT_VER}/RUTX/${RUTOS_FILE} && \
     tar -xf ${RUTOS_FILE} && \
     rm ${RUTOS_FILE}
 
-#Build
+#Build, remove dlna (somehow causes problems) and add netem and sched (for use with tc)
 RUN \
     cd ~ && \
-    cd rutos-ipq40xx-rutx-gpl &&\
-    ./scripts/feeds update -a &&\
-    make -j $(nproc)
+    cd rutos-ipq40xx-rutx-sdk && \
+    ./scripts/feeds update -a && \
+    echo "CONFIG_PACKAGE_kmod-netem=y" >> .config && \
+    echo "CONFIG_PACKAGE_kmod-sched=y" >> .config && \
+    sed -e '/dlna/ s/^#*/#/' -i .config && \
+    make -j $(nproc) V=s
